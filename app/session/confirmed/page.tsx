@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -18,7 +18,7 @@ import { CheckCircle, User, Calendar, Video, Clock, Mail, AlertTriangle, XCircle
 import { formatDateWithWeekday } from "@/lib/utils"
 import { getSessions, type Session } from "@/lib/sessions"
 
-export default function SessionConfirmed() {
+function SessionConfirmedContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get('id')
   
@@ -357,5 +357,25 @@ export default function SessionConfirmed() {
         </Dialog>
       </div>
     </div>
+  )
+}
+
+export default function SessionConfirmed() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-4 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center">
+          <div className="mb-8">
+            <div className="w-20 h-20 bg-emerald-100 rounded-full mx-auto mb-6 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+            </div>
+            <h1 className="text-2xl font-bold text-emerald-900 mb-2">Cargando...</h1>
+            <p className="text-emerald-700">Obteniendo datos de la sesión</p>
+          </div>
+        </div>
+      </div>
+    }>
+      <SessionConfirmedContent />
+    </Suspense>
   )
 }
