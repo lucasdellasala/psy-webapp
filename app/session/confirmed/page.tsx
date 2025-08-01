@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -14,23 +15,31 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { CheckCircle, User, Calendar, Video, Clock, Mail, AlertTriangle, XCircle, Home } from "lucide-react"
-
-// Mock data de la sesión
-const session = {
-  id: "session_123",
-  therapistName: "Dra. María Gómez",
-  startInPatientTz: "2025-07-30T10:00:00-03:00",
-  endInPatientTz: "2025-07-30T11:00:00-03:00",
-  modality: "online",
-  durationMin: 60,
-  patientEmail: "lucas@mail.com",
-  status: "confirmed",
-}
+import { formatDateWithWeekday } from "@/lib/utils"
+import { getSessions, type Session } from "@/lib/sessions"
 
 export default function SessionConfirmed() {
-  const [sessionStatus, setSessionStatus] = useState(session.status)
+  const searchParams = useSearchParams()
+  const sessionId = searchParams.get('id')
+  
+  const [session, setSession] = useState<Session | null>(null)
+  const [sessionStatus, setSessionStatus] = useState<string>("pending")
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingSession, setIsLoadingSession] = useState(true)
+
+  // Cargar datos de la sesión
+  useEffect(() => {
+    if (sessionId) {
+      const sessions = getSessions()
+      const foundSession = sessions.find(s => s.id === sessionId)
+      if (foundSession) {
+        setSession(foundSession)
+        setSessionStatus(foundSession.status)
+      }
+      setIsLoadingSession(false)
+    }
+  }, [sessionId])
 
   // Formatear fecha y hora
   const formatDateTime = (dateString: string) => {
@@ -45,8 +54,47 @@ export default function SessionConfirmed() {
       dayNumber,
       month,
       time,
-      fullDate: `${dayName.charAt(0).toUpperCase() + dayName.slice(1)} ${dayNumber} de ${month}`,
+      fullDate: formatDateWithWeekday(dateString.split('T')[0]), // Usar nuestra función de utilidad
     }
+  }
+
+  // Loading state
+  if (isLoadingSession) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-4 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center">
+          <div className="mb-8">
+            <div className="w-20 h-20 bg-emerald-100 rounded-full mx-auto mb-6 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+            </div>
+            <h1 className="text-2xl font-bold text-emerald-900 mb-2">Cargando...</h1>
+            <p className="text-emerald-700">Obteniendo datos de la sesión</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Error state - sesión no encontrada
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50 to-yellow-50 p-4 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center">
+          <div className="mb-8">
+            <div className="w-20 h-20 bg-red-100 rounded-full mx-auto mb-6 flex items-center justify-center">
+              <XCircle className="w-12 h-12 text-red-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-red-900 mb-2">Sesión no encontrada</h1>
+            <p className="text-red-700 mb-6">No se pudo encontrar la sesión solicitada</p>
+            <Link href="/my-sessions">
+              <Button className="bg-red-600 hover:bg-red-700 text-white">
+                Ver mis sesiones
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const startDateTime = formatDateTime(session.startInPatientTz)
@@ -139,9 +187,17 @@ export default function SessionConfirmed() {
           <div className="w-20 h-20 bg-emerald-100 rounded-full mx-auto mb-6 flex items-center justify-center">
             <CheckCircle className="w-12 h-12 text-emerald-600" />
           </div>
-          <h1 className="text-3xl font-bold text-emerald-900 mb-4">¡Tu sesión fue reservada con éxito!</h1>
+          <h1 className="text-3xl font-bold text-emerald-900 mb-4">
+            {sessionStatus === "confirmed" 
+              ? "¡Tu sesión fue confirmada!"
+              : "¡Tu sesión fue reservada con éxito!"
+            }
+          </h1>
           <p className="text-emerald-700 leading-relaxed">
-            Te enviamos todos los detalles por email. Recordá que podés cancelar hasta 24hs antes si es necesario.
+            {sessionStatus === "confirmed"
+              ? "Tu sesión está confirmada. Te enviamos todos los detalles por email."
+              : "Te enviamos todos los detalles por email. El profesional confirmará tu sesión pronto."
+            }
           </p>
         </div>
 
@@ -183,7 +239,9 @@ export default function SessionConfirmed() {
                 </div>
                 <div>
                   <p className="text-sm text-emerald-600 font-medium">Modalidad</p>
-                  <p className="text-emerald-900 font-semibold">Online</p>
+                  <p className="text-emerald-900 font-semibold">
+                    {session.modality === "online" ? "Online" : "Presencial"}
+                  </p>
                 </div>
               </div>
 
@@ -212,7 +270,20 @@ export default function SessionConfirmed() {
 
             {/* Estado de la sesión */}
             <div className="mt-6 text-center">
-              <Badge className="bg-emerald-600 text-white px-4 py-2">Sesión confirmada</Badge>
+              <Badge className={
+                sessionStatus === "confirmed" 
+                  ? "bg-emerald-600 text-white px-4 py-2"
+                  : sessionStatus === "canceled"
+                  ? "bg-red-600 text-white px-4 py-2"
+                  : "bg-orange-600 text-white px-4 py-2"
+              }>
+                {sessionStatus === "confirmed" 
+                  ? "Sesión confirmada"
+                  : sessionStatus === "canceled"
+                  ? "Sesión cancelada"
+                  : "Sesión pendiente de confirmación"
+                }
+              </Badge>
             </div>
           </CardContent>
         </Card>

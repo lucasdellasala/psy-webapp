@@ -14,7 +14,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Video, MapPin, Clock, Calendar, User, ChevronLeft, AlertTriangle, CalendarX } from "lucide-react"
-import { getSessions, cancelSession, type Session } from "@/lib/sessions"
+import { getSessions, cancelSession, syncSessionWithBackend, type Session } from "@/lib/sessions"
+import { formatDateWithWeekday } from "@/lib/utils"
 
 export default function MySessions() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -23,18 +24,29 @@ export default function MySessions() {
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    setSessions(getSessions())
+    const loadSessions = async () => {
+      const localSessions = getSessions()
+      setSessions(localSessions)
+      
+      // Sincronizar cada sesión con el backend
+      for (const session of localSessions) {
+        await syncSessionWithBackend(session.id)
+      }
+      
+      // Recargar sesiones después de sincronizar
+      const updatedSessions = getSessions()
+      setSessions(updatedSessions)
+    }
+    
+    loadSessions()
   }, [])
 
   const formatDateTime = (dateString: string) => {
     const date = new Date(dateString)
-    const dayName = date.toLocaleDateString("es-AR", { weekday: "long" })
-    const dayNumber = date.getDate()
-    const month = date.toLocaleDateString("es-AR", { month: "long" })
     const time = date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
 
     return {
-      fullDate: `${dayName.charAt(0).toUpperCase() + dayName.slice(1)} ${dayNumber} de ${month}`,
+      fullDate: formatDateWithWeekday(dateString.split('T')[0]), // Usar nuestra función de utilidad
       time,
     }
   }
@@ -45,19 +57,59 @@ export default function MySessions() {
   }
 
   const handleConfirmCancel = async () => {
+    if (!sessionToCancel) {
+      console.warn("⚠️ No hay sesión seleccionada para cancelar")
+      return
+    }
+
     setIsLoading(true)
 
-    // Simular delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      // Verificar que la sesión existe antes de cancelarla
+      const currentSessions = getSessions()
+      const sessionExists = currentSessions.some(s => s.id === sessionToCancel)
+      
+      if (!sessionExists) {
+        console.error("❌ Sesión no encontrada:", sessionToCancel)
+        setShowCancelDialog(false)
+        setSessionToCancel("")
+        return
+      }
 
-    cancelSession(sessionToCancel)
-    setSessions(getSessions())
-    setShowCancelDialog(false)
-    setSessionToCancel("")
-    setIsLoading(false)
+      // Simular delay para mejor UX
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+
+      // Cancelar la sesión (backend + localStorage)
+      await cancelSession(sessionToCancel)
+      
+      // Actualizar el estado local
+      setSessions(getSessions())
+      
+      // Cerrar el diálogo
+      setShowCancelDialog(false)
+      setSessionToCancel("")
+    } catch (error: any) {
+      console.error("❌ Error al cancelar la sesión:", error)
+      
+      // Manejar errores específicos del backend
+      if (error.status === 404) {
+        console.error("❌ Sesión no encontrada en el backend")
+      } else if (error.status === 409) {
+        console.error("❌ La sesión ya fue cancelada")
+      } else if (error.status >= 500) {
+        console.error("❌ Error del servidor")
+      }
+      
+      // Cerrar el diálogo incluso si hay error
+      setShowCancelDialog(false)
+      setSessionToCancel("")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const confirmedSessions = sessions.filter((s) => s.status === "confirmed")
+  const pendingSessions = sessions.filter((s) => s.status === "pending")
   const canceledSessions = sessions.filter((s) => s.status === "canceled")
 
   return (
@@ -101,6 +153,71 @@ export default function MySessions() {
           </Card>
         ) : (
           <div className="space-y-6">
+            {/* Sesiones pendientes */}
+            {pendingSessions.length > 0 && (
+              <div>
+                <h2 className="text-lg font-semibold text-orange-900 mb-4">Sesiones pendientes</h2>
+                <div className="space-y-4">
+                  {pendingSessions.map((session) => {
+                    const dateTime = formatDateTime(session.startInPatientTz)
+                    const endTime = new Date(session.endInPatientTz).toLocaleTimeString("es-AR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+
+                    return (
+                      <Card key={session.id} className="border-orange-200 bg-orange-50">
+                        <CardContent className="p-5">
+                          <div className="flex items-start justify-between mb-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <User className="w-4 h-4 text-orange-600" />
+                                <h3 className="font-semibold text-orange-900">{session.therapistName}</h3>
+                              </div>
+
+                              <div className="space-y-2 text-sm">
+                                <div className="flex items-center gap-2 text-orange-700">
+                                  <Calendar className="w-4 h-4" />
+                                  <span>{dateTime.fullDate}</span>
+                                </div>
+
+                                <div className="flex items-center gap-2 text-orange-700">
+                                  <Clock className="w-4 h-4" />
+                                  <span>
+                                    {dateTime.time} – {endTime} ({session.durationMin} min)
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2 text-orange-700">
+                                  {session.modality === "online" ? (
+                                    <Video className="w-4 h-4" />
+                                  ) : (
+                                    <MapPin className="w-4 h-4" />
+                                  )}
+                                  <span>{session.modality === "online" ? "Online" : "Presencial"}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <Badge className="bg-orange-600 text-white">Pendiente</Badge>
+                          </div>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCancelClick(session.id)}
+                            className="w-full border-red-300 text-red-700 hover:bg-red-50 bg-transparent"
+                          >
+                            Cancelar sesión
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Sesiones confirmadas */}
             {confirmedSessions.length > 0 && (
               <div>

@@ -6,63 +6,32 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Video, MapPin, Calendar, Heart, CalendarDays } from "lucide-react"
-
-// Mock data
-const topics = [
-  { id: "anxiety", name: "Ansiedad" },
-  { id: "depression", name: "Depresión" },
-  { id: "relationships", name: "Relaciones personales" },
-  { id: "grief", name: "Duelo" },
-  { id: "stress", name: "Estrés" },
-  { id: "self-esteem", name: "Autoestima" },
-  { id: "family", name: "Familia" },
-  { id: "work", name: "Trabajo" },
-]
+import { useTopics, useTherapists } from "@/hooks/use-api"
+import { LoadingPage } from "@/components/ui/loading"
+import { ErrorPage } from "@/components/ui/error"
+import type { TherapistsQueryParams } from "@/lib/types"
 
 const modalities = [
   { value: "online", label: "Online", icon: Video },
   { value: "in_person", label: "Presencial", icon: MapPin },
 ]
 
-const therapists = [
-  {
-    id: "t1",
-    name: "Dra. María Gómez",
-    modalities: ["online", "in_person"],
-    topics: ["Ansiedad", "Relaciones personales"],
-    availabilitySummary: { freeSlotsCount: 3 },
-    specialty: "Psicóloga Clínica",
-  },
-  {
-    id: "t2",
-    name: "Lic. Juan Pérez",
-    modalities: ["online"],
-    topics: ["Depresión", "Estrés"],
-    availabilitySummary: { freeSlotsCount: 1 },
-    specialty: "Psicólogo Cognitivo-Conductual",
-  },
-  {
-    id: "t3",
-    name: "Dra. Ana Rodríguez",
-    modalities: ["in_person"],
-    topics: ["Duelo", "Familia"],
-    availabilitySummary: { freeSlotsCount: 5 },
-    specialty: "Terapeuta Familiar",
-  },
-  {
-    id: "t4",
-    name: "Lic. Carlos Mendoza",
-    modalities: ["online", "in_person"],
-    topics: ["Autoestima", "Trabajo"],
-    availabilitySummary: { freeSlotsCount: 2 },
-    specialty: "Psicólogo Organizacional",
-  },
-]
-
 export default function TherapistFinder() {
   const [selectedTopics, setSelectedTopics] = useState<string[]>([])
   const [selectedModality, setSelectedModality] = useState<string>("")
   const [showResults, setShowResults] = useState(false)
+
+  // API hooks
+  const { data: topicsData, loading: topicsLoading, error: topicsError, refetch: refetchTopics } = useTopics()
+  
+  const queryParams: TherapistsQueryParams = {
+    topicIds: selectedTopics.length > 0 ? selectedTopics.join(',') : undefined,
+    modality: selectedModality as 'online' | 'in_person' | undefined,
+    limit: 10,
+    offset: 0
+  }
+  
+  const { data: therapistsData, loading: therapistsLoading, error: therapistsError, refetch: refetchTherapists } = useTherapists(showResults ? queryParams : undefined)
 
   const toggleTopic = (topicId: string) => {
     setSelectedTopics((prev) => (prev.includes(topicId) ? prev.filter((id) => id !== topicId) : [...prev, topicId]))
@@ -72,15 +41,25 @@ export default function TherapistFinder() {
     setShowResults(true)
   }
 
-  const filteredTherapists = therapists.filter((therapist) => {
-    const modalityMatch = !selectedModality || therapist.modalities.includes(selectedModality)
-    const topicMatch =
-      selectedTopics.length === 0 ||
-      selectedTopics.some((topic) =>
-        therapist.topics.some((therapistTopic) => topics.find((t) => t.id === topic)?.name === therapistTopic),
-      )
-    return modalityMatch && topicMatch
-  })
+  // Loading states
+  if (topicsLoading && !topicsData) {
+    return <LoadingPage />
+  }
+
+  if (topicsError) {
+    return <ErrorPage title="Error al cargar temas" message={topicsError} onRetry={refetchTopics} />
+  }
+
+  if (showResults && therapistsLoading) {
+    return <LoadingPage />
+  }
+
+  if (showResults && therapistsError) {
+    return <ErrorPage title="Error al buscar terapeutas" message={therapistsError} onRetry={refetchTherapists} />
+  }
+
+  const topics = topicsData || []
+  const therapists = therapistsData || []
 
   if (showResults) {
     return (
@@ -97,27 +76,26 @@ export default function TherapistFinder() {
             </Button>
             <h1 className="text-2xl font-bold text-emerald-900 mb-2">Profesionales disponibles</h1>
             <p className="text-emerald-700 text-sm">
-              Encontramos {filteredTherapists.length} profesionales que pueden acompañarte
+              Encontramos {therapists.length} profesionales que pueden acompañarte
             </p>
           </div>
 
           {/* Results */}
           <div className="space-y-4">
-            {filteredTherapists.length > 0 ? (
-              filteredTherapists.map((therapist) => (
+            {therapists.length > 0 ? (
+              therapists.map((therapist: any) => (
                 <Card
                   key={therapist.id}
                   className="border-emerald-200 shadow-sm hover:shadow-md transition-shadow relative"
                 >
                   <CardContent className="p-5">
                     {/* Badge de poca disponibilidad */}
-                    {therapist.availabilitySummary.freeSlotsCount <= 2 && (
+                    {therapist.availabilitySummary && therapist.availabilitySummary.freeSlotsCount <= 2 && (
                       <div className="absolute top-3 right-3">
                         <Badge className="bg-orange-500 text-white text-xs px-2 py-1">🟠 ¡Quedan pocos turnos!</Badge>
                       </div>
                     )}
 
-                    {/* Resto del contenido de la card permanece igual */}
                     <div className="flex items-start justify-between mb-3">
                       <div>
                         <h3 className="font-semibold text-emerald-900 text-lg">{therapist.name}</h3>
@@ -125,15 +103,17 @@ export default function TherapistFinder() {
                       </div>
                       <div className="flex items-center gap-1 text-emerald-700">
                         <Calendar className="w-4 h-4" />
-                        <span className="text-sm font-medium">{therapist.availabilitySummary.freeSlotsCount}</span>
+                        <span className="text-sm font-medium">
+                          {therapist.availabilitySummary?.freeSlotsCount || 0}
+                        </span>
                       </div>
                     </div>
 
                     {/* Modalities */}
                     <div className="flex gap-2 mb-3">
-                      {therapist.modalities.map((modality) => (
+                      {therapist.modalities.map((modality: string, index: number) => (
                         <Badge
-                          key={modality}
+                          key={`${modality}-${index}`}
                           variant="secondary"
                           className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 flex items-center gap-1"
                         >
@@ -145,9 +125,9 @@ export default function TherapistFinder() {
 
                     {/* Topics */}
                     <div className="flex flex-wrap gap-1 mb-4">
-                      {therapist.topics.map((topic) => (
-                        <Badge key={topic} variant="outline" className="text-xs border-emerald-300 text-emerald-700">
-                          {topic}
+                      {therapist.topics.map((topic: any, index: number) => (
+                        <Badge key={`${topic.id || topic}-${index}`} variant="outline" className="text-xs border-emerald-300 text-emerald-700">
+                          {topic.name || topic}
                         </Badge>
                       ))}
                     </div>
@@ -155,7 +135,7 @@ export default function TherapistFinder() {
                     {/* Availability */}
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-emerald-600">
-                        {therapist.availabilitySummary.freeSlotsCount} turnos disponibles esta semana
+                        {therapist.availabilitySummary?.freeSlotsCount || 0} turnos disponibles esta semana
                       </span>
                       <Link href={`/therapist/${therapist.id}`}>
                         <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white">
@@ -235,7 +215,7 @@ export default function TherapistFinder() {
           <h2 className="text-xl font-semibold text-emerald-900 mb-4">¿Qué te gustaría trabajar?</h2>
           <p className="text-emerald-600 text-sm mb-4">Podés elegir uno o varios temas que te resuenen</p>
           <div className="flex flex-wrap gap-2">
-            {topics.map((topic) => (
+            {topics.map((topic: any) => (
               <button
                 key={topic.id}
                 onClick={() => toggleTopic(topic.id)}
